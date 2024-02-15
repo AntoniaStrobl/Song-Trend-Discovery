@@ -1,0 +1,96 @@
+import requests
+import re
+import pandas as pd
+import spotipy
+
+def search_playlists(access_token, search_term="December"):
+    """
+    Search for playlists containing the given search term.
+    """
+    results = []
+    next_page_url = f"https://api.spotify.com/v1/search?q={search_term}&type=playlist&limit=50"
+
+    while next_page_url:
+        headers = {'Authorization': f'Bearer {access_token}'}
+        response = requests.get(next_page_url, headers=headers)
+        response.raise_for_status()
+        data = response.json()
+
+        pattern = r"Dec(ember)?\s*2023?"
+        playlists = [playlist for playlist in data['playlists']['items']
+                     if re.search(pattern, playlist['name'], re.IGNORECASE)]
+
+        results.extend(playlists)
+        next_page_url = data['playlists'].get('next')
+
+    return results
+
+def get_access_token(client_id, client_secret):
+    """
+    Retrieve the access token using client credentials flow.
+    """
+    data = {
+        'grant_type': 'client_credentials',
+        'client_id': client_id,
+        'client_secret': client_secret
+    }
+
+    response = requests.post('https://accounts.spotify.com/api/token', data=data)
+    response.raise_for_status()
+    access_token = response.json()['access_token']
+    return access_token
+
+def store_playlist_tracks(songs, playlist_ids, access_token):
+    """
+    Retrieve tracks from playlists and store them in a DataFrame.
+    """
+    sp = spotipy.Spotify(auth=access_token)
+    playlist_tracks = []
+
+    for playlist_id in playlist_ids:
+        tracks = sp.playlist_tracks(playlist_id)['items']
+
+        for track in tracks:
+            if track['track']:
+                track_data = {
+                    'song_name': track['track']['name'],
+                    'artist_name': track['track']['artists'][0]['name'],
+                    'playlist_id': playlist_id
+                }
+                playlist_tracks.append(track_data)
+
+    playlist_tracks_df = pd.DataFrame(playlist_tracks)
+    songs = songs.append(playlist_tracks_df)
+    return songs
+
+def find_most_mentioned_tracks(songs):
+    """
+    Find the top 10 most mentioned tracks.
+    """
+    track_counts = songs['song_name'].value_counts()
+    top_10_most_mentioned_tracks = track_counts.nlargest(10)
+    return top_10_most_mentioned_tracks
+
+def find_most_mentioned_artists(songs):
+    """
+    Find the top 10 most mentioned artists.
+    """
+    artist_counts = songs['artist_name'].value_counts()
+    top_10_most_mentioned_artists = artist_counts.nlargest(10)
+    return top_10_most_mentioned_artists
+
+if __name__ == "__main__":
+    # Update with your client ID and client secret
+    client_id = "YOUR_CLIENT_ID"
+    client_secret = "YOUR_CLIENT_SECRET"
+
+    access_token = get_access_token(client_id, client_secret)
+    playlist_ids = [playlist['id'] for playlist in search_playlists(access_token)]
+    songs = pd.DataFrame()
+    songs = store_playlist_tracks(songs, playlist_ids, access_token)
+    top_10_s = find_most_mentioned_tracks(songs)
+    top_10_a = find_most_mentioned_artists(songs)
+
+    print(f"Number of playlists found: {len(playlist_ids)}")
+    print("Top songs:", top_10_s)
+    print("Top artists:", top_10_a)
